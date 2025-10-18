@@ -1,0 +1,614 @@
+--// Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--// Rayfield Library
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Window = Rayfield:CreateWindow({
+   Name = "RazorV2",
+   Icon = 0,
+   LoadingTitle = "RZZZZZZZZZ!!!! RRRR!!Zzzz!",
+   LoadingSubtitle = "by raze",
+   ShowText = "Rayfield",
+   Theme = "Default",
+   ToggleUIKeybind = "R",
+
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil,
+      FileName = "RazorV2"
+   },
+
+   Discord = {
+      Enabled = false,
+      Invite = "noinvitelink",
+      RememberJoins = true
+   },
+
+   KeySystem = false,
+   KeySettings = {
+      Title = "Untitled",
+      Subtitle = "Key System",
+      Note = "No method of obtaining the key is provided",
+      FileName = "Key",
+      SaveKey = true,
+      GrabKeyFromSite = false,
+      Key = {"Hello"}
+   }
+})
+
+local Tab = Window:CreateTab("Combat", 4483362458)
+local Section = Tab:CreateSection("Aimbot")
+
+-- Variables
+local Locking = false
+local Prediction = 0.1
+local AimPart = "Head"
+local KeybindKey = Enum.KeyCode.E
+local TeamCheck = false
+local WallCheck = false
+local CurrentTarget = nil
+local LockMode = "Closest to Cursor" -- or "Closest by Distance"
+
+---------------------------------------------------------
+--// UI Elements
+---------------------------------------------------------
+
+-- Toggle: Lock-On Enabled
+local Toggle = Tab:CreateToggle({
+    Name = "Lock-On Enabled",
+    CurrentValue = false,
+    Flag = "LockToggle",
+    Callback = function(Value)
+        Locking = Value
+        if not Value then
+            CurrentTarget = nil
+        end
+    end,
+})
+
+-- Slider: Prediction Strength
+local Slider = Tab:CreateSlider({
+    Name = "Prediction Strength",
+    Range = {0, 1},
+    Increment = 0.01,
+    Suffix = "x",
+    CurrentValue = 0.1,
+    Flag = "PredictionSlider",
+    Callback = function(Value)
+        -- Higher = stronger tracking
+        Prediction = Value
+    end,
+})
+
+-- Dropdown: Aim Part
+local Dropdown = Tab:CreateDropdown({
+    Name = "Aim Part",
+    Options = {"Head", "HumanoidRootPart", "UpperTorso"},
+    CurrentOption = {"Head"},
+    MultipleOptions = false,
+    Flag = "AimPartDropdown",
+    Callback = function(Options)
+        AimPart = Options[1]
+    end,
+})
+
+-- Dropdown: Lock Mode
+local LockModeDropdown = Tab:CreateDropdown({
+    Name = "Lock Mode",
+    Options = {"Closest to Cursor", "Closest by Distance"},
+    CurrentOption = {"Closest to Cursor"},
+    MultipleOptions = false,
+    Flag = "LockModeDropdown",
+    Callback = function(Options)
+        LockMode = Options[1]
+    end,
+})
+
+-- Toggle: Team Check
+local TeamToggle = Tab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = false,
+    Flag = "TeamCheck",
+    Callback = function(Value)
+        TeamCheck = Value
+    end,
+})
+
+-- Toggle: Wall Check
+local WallToggle = Tab:CreateToggle({
+    Name = "Wall Check",
+    CurrentValue = false,
+    Flag = "WallCheck",
+    Callback = function(Value)
+        WallCheck = Value
+    end,
+})
+
+-- Keybind: Lock Key
+local Keybind = Tab:CreateKeybind({
+    Name = "Lock-On Keybind",
+    CurrentKeybind = "E",
+    HoldToInteract = false,
+    Flag = "LockKeybind",
+    Callback = function(Key)
+        -- Fix: safely parse the keybind (handles string/Enum correctly)
+        if typeof(Key) == "EnumItem" then
+            KeybindKey = Key
+        elseif typeof(Key) == "string" and Enum.KeyCode[Key] then
+            KeybindKey = Enum.KeyCode[Key]
+        end
+    end,
+})
+local triggerEnabled = false
+local triggerConnection
+
+local function startHolding()
+	print("MouseButton1 Clicked!") -- simulate click
+end
+
+local function stopHolding()
+	-- reset logic if needed
+end
+
+-- Raycast from screen center to detect other players
+local function getCenterTarget()
+	local cam = workspace.CurrentCamera
+	local ray = cam:ScreenPointToRay(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 1000)
+	if result and result.Instance then
+		for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+			if plr ~= game.Players.LocalPlayer and plr.Character and result.Instance:IsDescendantOf(plr.Character) then
+				return plr
+			end
+		end
+	end
+	return nil
+end
+
+local Section = Tab:CreateSection("Triggerbot")
+local Toggle = Tab:CreateToggle({
+	Name = "TriggerBot (WIP)",
+	CurrentValue = false,
+	Flag = "TriggerBotToggle",
+	Callback = function(Value)
+		triggerEnabled = Value
+
+		if triggerConnection then
+			triggerConnection:Disconnect()
+			triggerConnection = nil
+		end
+
+		if not Value then
+			stopHolding()
+			return
+		end
+
+		triggerConnection = game:GetService("RunService").RenderStepped:Connect(function()
+			if not triggerEnabled then
+				stopHolding()
+				return
+			end
+
+			local lp = game.Players.LocalPlayer
+			if not lp.Character or not lp.Character:FindFirstChild("Head") then
+				stopHolding()
+				return
+			end
+
+			local target = getCenterTarget()
+			if target and target.Character:FindFirstChildOfClass("Humanoid") and target.Character.Humanoid.Health > 0 then
+				startHolding()
+			else
+				stopHolding()
+			end
+		end)
+	end,
+})
+
+local Tab = Window:CreateTab("ESP", 4483362458) -- Title, Image
+--// Player Box ESP Script (R6 + R15) with Rayfield Toggle + Color Picker
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--// Variables first (so callbacks can access them safely)
+local ESPEnabled = false
+local BoxColor = Color3.fromRGB(255, 255, 255)
+local BoxThickness = 2
+local Drawings = {}
+
+--// Define helper before callbacks
+local function ClearESP()
+	for _, box in pairs(Drawings) do
+		box:Remove()
+	end
+	Drawings = {}
+end
+
+--// UI Setup (with corrected callback order)
+local Toggle = Tab:CreateToggle({
+	Name = "Box ESP",
+	CurrentValue = false,
+	Flag = "Toggle1",
+	Callback = function(Value)
+		ESPEnabled = Value
+		if not Value then
+			ClearESP()
+		end
+	end,
+})
+
+local ColorPicker = Tab:CreateColorPicker({
+	Name = "Box Color",
+	Color = Color3.fromRGB(255,255,255),
+	Flag = "ColorPicker1",
+	Callback = function(Value)
+		BoxColor = Value
+	end
+})
+--// Tracer ESP Script (R6 + R15) with Rayfield Toggle + Color Picker
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--// Variables first (prevents callback errors)
+local TracerEnabled = false
+local TracerColor = Color3.fromRGB(255, 255, 255)
+local Tracers = {}
+local LineThickness = 2
+
+--// Helper function to clear tracers
+local function ClearTracers()
+	for _, line in pairs(Tracers) do
+		line:Remove()
+	end
+	Tracers = {}
+end
+
+--// UI Setup (your provided format)
+local Toggle = Tab:CreateToggle({
+	Name = "Tracer ESP",
+	CurrentValue = false,
+	Flag = "TracerToggle",
+	Callback = function(Value)
+		TracerEnabled = Value
+		if not Value then
+			ClearTracers()
+		end
+	end,
+})
+
+local ColorPicker = Tab:CreateColorPicker({
+	Name = "Tracer Color",
+	Color = Color3.fromRGB(255, 255, 255),
+	Flag = "TracerColor",
+	Callback = function(Value)
+		TracerColor = Value
+	end
+})
+--// Other Players Rig Visualizer (No Extra Lines / Curves)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Variables
+local RigVisualizerEnabled = false
+local RigColor = Color3.fromRGB(255, 255, 255)
+local LineThickness = 2
+local RigLines = {} -- [playerName] = {Lines = {}, Connections = {}}
+
+-- Clear all lines
+local function ClearRigLines()
+	for _, playerLines in pairs(RigLines) do
+		for _, line in pairs(playerLines.Lines) do
+			line:Remove()
+		end
+	end
+	RigLines = {}
+end
+
+-- Toggle + Color Picker
+local RigToggle = Tab:CreateToggle({
+	Name = "Bones ESP",
+	CurrentValue = false,
+	Flag = "RigVisualizerToggle",
+	Callback = function(Value)
+		RigVisualizerEnabled = Value
+		if not Value then ClearRigLines() end
+	end,
+})
+
+local RigColorPicker = Tab:CreateColorPicker({
+	Name = "Bones Color",
+	Color = Color3.fromRGB(255,255,255),
+	Flag = "RigVisualizerColor",
+	Callback = function(Value)
+		RigColor = Value
+	end
+})
+
+-- Precompute limb connections
+local function ComputeRigLines(character)
+	local parts = {}
+	for _, name in ipairs({
+		"Head","Torso","UpperTorso","LowerTorso",
+		"LeftArm","RightArm","LeftLeg","RightLeg",
+		"LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm",
+		"LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg",
+		"LeftHand","RightHand","LeftFoot","RightFoot"
+	}) do
+		local part = character:FindFirstChild(name)
+		if part then table.insert(parts, part) end
+	end
+
+	local connections = {}
+	for _, part in ipairs(parts) do
+		for _, joint in ipairs(part:GetJoints()) do
+			if joint.Part0 and joint.Part1 then
+				table.insert(connections, {joint.Part0, joint.Part1})
+			end
+		end
+	end
+
+	return connections
+end
+
+-- Render loop
+RunService.RenderStepped:Connect(function()
+	if not RigVisualizerEnabled then return end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character then
+			local char = player.Character
+
+			-- Setup lines if first time
+			if not RigLines[player.Name] then
+				local connections = ComputeRigLines(char)
+				if #connections == 0 then continue end -- skip if no connections
+
+				local lines = {}
+				for i, conn in ipairs(connections) do
+					-- Only create line if both parts exist
+					if conn[1] and conn[2] then
+						local line = Drawing.new("Line")
+						line.Thickness = LineThickness
+						line.Color = RigColor
+						line.Visible = false -- hide initially
+						table.insert(lines, line)
+					end
+				end
+				RigLines[player.Name] = {Lines = lines, Connections = connections}
+			end
+
+			local data = RigLines[player.Name]
+			for i, conn in ipairs(data.Connections) do
+				local p0, p1 = conn[1], conn[2]
+				local line = data.Lines[i]
+
+				if p0 and p1 and line then
+					local s0, onScreen0 = Camera:WorldToViewportPoint(p0.Position)
+					local s1, onScreen1 = Camera:WorldToViewportPoint(p1.Position)
+
+					-- Only draw if both points are valid
+					if (onScreen0 or onScreen1) then
+						line.Visible = true
+						line.From = Vector2.new(s0.X, s0.Y)
+						line.To = Vector2.new(s1.X, s1.Y)
+						line.Color = RigColor
+					else
+						line.Visible = false
+					end
+				elseif line then
+					line.Visible = false -- hide invalid lines
+				end
+			end
+		end
+	end
+end)
+
+-- Cleanup when players leave
+Players.PlayerRemoving:Connect(function(player)
+	if RigLines[player.Name] then
+		for _, line in pairs(RigLines[player.Name].Lines) do
+			line:Remove()
+		end
+		RigLines[player.Name] = nil
+	end
+end)
+
+--// ESP logic
+RunService.RenderStepped:Connect(function()
+	if not TracerEnabled then return end
+
+	local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local hrp = player.Character.HumanoidRootPart
+			local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+			local name = player.Name
+
+			local line = Tracers[name]
+			if not line then
+				line = Drawing.new("Line")
+				line.Thickness = LineThickness
+				line.Color = TracerColor
+				Tracers[name] = line
+			end
+
+			if onScreen then
+				line.Visible = true
+				line.From = screenCenter
+				line.To = Vector2.new(screenPos.X, screenPos.Y)
+				line.Color = TracerColor
+			else
+				line.Visible = false
+			end
+		end
+	end
+
+	-- Cleanup invisible / missing players
+	for name, line in pairs(Tracers) do
+		local plr = Players:FindFirstChild(name)
+		if not plr or not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then
+			line.Visible = false
+		end
+	end
+end)
+
+--// ESP logic
+local function GetCharacterCorners(character)
+	local modelCF, modelSize = character:GetBoundingBox()
+	local half = modelSize / 2
+	local corners = {
+		Vector3.new(-half.X,  half.Y, -half.Z),
+		Vector3.new( half.X,  half.Y, -half.Z),
+		Vector3.new( half.X, -half.Y, -half.Z),
+		Vector3.new(-half.X, -half.Y, -half.Z),
+		Vector3.new(-half.X,  half.Y,  half.Z),
+		Vector3.new( half.X,  half.Y,  half.Z),
+		Vector3.new( half.X, -half.Y,  half.Z),
+		Vector3.new(-half.X, -half.Y,  half.Z),
+	}
+	for i, v in ipairs(corners) do
+		corners[i] = modelCF:PointToWorldSpace(v)
+	end
+	return corners
+end
+
+RunService.RenderStepped:Connect(function()
+	if not ESPEnabled then return end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local corners = GetCharacterCorners(player.Character)
+			local screenCorners, onScreen = {}, false
+
+			for i, v in ipairs(corners) do
+				local screenPos, visible = Camera:WorldToViewportPoint(v)
+				screenCorners[i] = Vector2.new(screenPos.X, screenPos.Y)
+				if visible then onScreen = true end
+			end
+
+			local name = player.Name
+			local box = Drawings[name]
+			if not box then
+				box = Drawing.new("Square")
+				box.Thickness = BoxThickness
+				box.Filled = false
+				Drawings[name] = box
+			end
+
+			if onScreen then
+				local minX, minY = math.huge, math.huge
+				local maxX, maxY = -math.huge, -math.huge
+				for _, v in ipairs(screenCorners) do
+					minX = math.min(minX, v.X)
+					minY = math.min(minY, v.Y)
+					maxX = math.max(maxX, v.X)
+					maxY = math.max(maxY, v.Y)
+				end
+
+				box.Visible = true
+				box.Color = BoxColor
+				box.Position = Vector2.new(minX, minY)
+				box.Size = Vector2.new(maxX - minX, maxY - minY)
+			else
+				box.Visible = false
+			end
+		end
+	end
+
+	-- Cleanup dead players
+	for name, box in pairs(Drawings) do
+		local plr = Players:FindFirstChild(name)
+		if not plr or not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then
+			box.Visible = false
+		end
+	end
+end)
+
+
+---------------------------------------------------------
+--// Helper Functions
+---------------------------------------------------------
+
+local function IsVisible(targetPart)
+    if not WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
+
+    local result = workspace:Raycast(origin, direction, rayParams)
+    return result == nil -- true if nothing is hit between you and target
+end
+
+local function GetClosestPlayer()
+    local shortestValue = math.huge
+    local closestPlayer = nil
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(AimPart) then
+            if TeamCheck and player.Team == LocalPlayer.Team then
+                continue
+            end
+
+            local targetPart = player.Character[AimPart]
+            local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if onScreen and IsVisible(targetPart) then
+                if LockMode == "Closest to Cursor" then
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local distance = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if distance < shortestValue then
+                        shortestValue = distance
+                        closestPlayer = player
+                    end
+                else
+                    -- Closest by world distance
+                    local distance = (LocalPlayer.Character.HumanoidRootPart.Position - targetPart.Position).Magnitude
+                    if distance < shortestValue then
+                        shortestValue = distance
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+---------------------------------------------------------
+--// Lock-On Logic
+---------------------------------------------------------
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == KeybindKey and Locking then
+        if CurrentTarget then
+            CurrentTarget = nil
+        else
+            CurrentTarget = GetClosestPlayer()
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if Locking and CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild(AimPart) then
+        local targetPart = CurrentTarget.Character[AimPart]
+        local predictedPos = targetPart.Position + (targetPart.Velocity * Prediction)
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, predictedPos)
+    end
+end)
